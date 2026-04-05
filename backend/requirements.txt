@@ -14,3 +14,11 @@ lancedb==0.15.0
 pyarrow==17.0.0
 tenacity==9.0.0
 python-multipart==0.0.12
+
+# RAG quality (Phase 2)
+sentence-transformers==5.3.0
+kiwipiepy==0.22.2
+tantivy==0.25.1
+ragas==0.4.3
+langchain-openai==1.1.12
+PyYAML>=6.0

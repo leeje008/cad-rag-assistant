@@ -49,11 +49,24 @@ class Settings(BaseSettings):
     # Ollama
     ollama_base_url: str = "http://localhost:11434"
     llm_model: str = "qwen3.5:27b"
-    embed_model: str = "mxbai-embed-large"
+    embed_model: str = "bge-m3"
     vision_model: str = "gemma4:e4b"
     fallback_llm_model: str = "llama3.1:8b"
     embed_dimension: int = 1024
     embed_batch: int = 16
+
+    # Retrieval — Phase 2
+    reranker_model: str = "BAAI/bge-reranker-v2-m3"
+    use_hybrid: bool = True
+    use_reranker: bool = True
+    rerank_candidate_n: int = 20
+    final_top_k: int = 5
+    rrf_k: int = 60
+    multi_query_n: int = 3
+    use_multi_query: bool = True
+    # Query rewriting is a light task; prefer a fast fallback model so it
+    # doesn't block the hybrid retrieval path behind a 27B warmup.
+    query_rewriter_model: str = "llama3.1:8b"
 
     # Ollama timeouts (seconds)
     ollama_connect_timeout: float = 5.0

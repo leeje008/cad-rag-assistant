@@ -1,4 +1,10 @@
-"""LanceDB wrapper: schema, open-or-create, doc-level upsert, search."""
+"""LanceDB wrapper: schema, open-or-create, doc-level upsert, search.
+
+Phase 2 additions:
+- `text_fts` column populated with kiwi-tokenised text for Tantivy FTS
+- `ensure_fts_index(table)` — creates whitespace tokenizer index idempotently
+- `search_fts(table, query_tokens, k)` — lexical search over the FTS column
+"""
 
 from __future__ import annotations
 
@@ -11,6 +17,7 @@ import pyarrow as pa
 
 from .chunker import Chunk
 from .settings import settings
+from .tokenizer_ko import tokenize_for_fts
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +30,7 @@ def _schema(dim: int) -> pa.Schema:
             pa.field("source_path", pa.string()),
             pa.field("title", pa.string()),
             pa.field("text", pa.string()),
+            pa.field("text_fts", pa.string()),
             pa.field("section", pa.string()),
             pa.field("page", pa.int32()),
             pa.field("char_start", pa.int32()),
@@ -53,6 +61,22 @@ def open_or_create_table(
     return table
 
 
+def ensure_fts_index(table) -> None:
+    """Create the whitespace FTS index on `text_fts` if it doesn't exist.
+
+    LanceDB re-indexing is idempotent but noisy, so we try once and log on
+    failure rather than blocking startup.
+    """
+
+    if table is None:
+        return
+    try:
+        table.create_fts_index("text_fts", replace=True)
+        logger.info("ensured FTS index on text_fts")
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("create_fts_index skipped: %s", exc)
+
+
 def upsert_chunks(table, chunks: list[Chunk], vectors: list[list[float]]) -> int:
     if not chunks:
         return 0
@@ -79,6 +103,7 @@ def upsert_chunks(table, chunks: list[Chunk], vectors: list[list[float]]) -> int
                 "source_path": chunk.source_path,
                 "title": chunk.title,
                 "text": chunk.text,
+                "text_fts": tokenize_for_fts(chunk.text),
                 "section": chunk.section or "",
                 "page": chunk.page if chunk.page is not None else -1,
                 "char_start": chunk.char_start,
@@ -92,6 +117,8 @@ def upsert_chunks(table, chunks: list[Chunk], vectors: list[list[float]]) -> int
 
 
 def search(table, query_vector: list[float], k: int) -> list[dict[str, Any]]:
+    """Dense-only vector search (kept for the legacy retriever path)."""
+
     if table is None:
         return []
     result = table.search(query_vector).limit(k).to_list()
@@ -101,6 +128,32 @@ def search(table, query_vector: list[float], k: int) -> list[dict[str, Any]]:
             row["_relevance"] = None
         else:
             row["_relevance"] = 1.0 / (1.0 + float(distance))
+    return result
+
+
+def search_fts(table, query: str, k: int) -> list[dict[str, Any]]:
+    """Lexical (BM25 via Tantivy) search over the kiwi-tokenised column.
+
+    Returns rows with a `_score` field (higher is better).
+    """
+
+    if table is None:
+        return []
+    tokenised_query = tokenize_for_fts(query)
+    if not tokenised_query:
+        return []
+    try:
+        result = (
+            table.search(tokenised_query, query_type="fts", fts_columns="text_fts")
+            .limit(k)
+            .to_list()
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("FTS search failed, returning empty: %s", exc)
+        return []
+    for row in result:
+        score = row.get("_score")
+        row["_relevance"] = float(score) if score is not None else None
     return result
 
 

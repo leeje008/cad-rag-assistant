@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .routers import chat, documents, ingest, retrieve
 from .services.settings import settings
-from .services.vectorstore import open_or_create_table
+from .services.vectorstore import ensure_fts_index, open_or_create_table
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
@@ -34,6 +34,7 @@ async def lifespan(app: FastAPI):
         app.state.http = client
         try:
             app.state.table = open_or_create_table()
+            ensure_fts_index(app.state.table)
         except Exception as exc:  # noqa: BLE001
             logger.exception("LanceDB init failed: %s", exc)
             app.state.table = None
