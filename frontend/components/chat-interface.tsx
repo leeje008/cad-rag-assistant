@@ -88,6 +88,21 @@ export function ChatInterface({ selectedModel }: ChatInterfaceProps) {
             } catch {
               // skip malformed chunks
             }
+          } else if (line.startsWith("s:")) {
+            // Custom source part (CAD RAG backend extension): JSON array of Source
+            try {
+              const sources = JSON.parse(line.slice(2)) as Source[];
+              setMessages((prev) => {
+                const updated = [...prev];
+                const last = updated[updated.length - 1];
+                if (last.role === "assistant") {
+                  last.sources = sources;
+                }
+                return updated;
+              });
+            } catch {
+              // skip malformed chunks
+            }
           }
         }
       }

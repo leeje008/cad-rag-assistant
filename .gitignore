@@ -38,6 +38,7 @@ CAD-RAG-*.docx
 
 # Vector DB data
 data/lancedb/
+backend/.lancedb/
 
 # Logs
 *.log
