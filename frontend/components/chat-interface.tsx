@@ -15,7 +15,11 @@ interface Message {
   sources?: Source[];
 }
 
-export function ChatInterface() {
+interface ChatInterfaceProps {
+  selectedModel: string;
+}
+
+export function ChatInterface({ selectedModel }: ChatInterfaceProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
@@ -52,7 +56,7 @@ export function ChatInterface() {
       const response = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: trimmed }),
+        body: JSON.stringify({ message: trimmed, model: selectedModel }),
       });
 
       if (!response.ok) throw new Error("Failed to fetch response");

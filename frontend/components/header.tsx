@@ -1,12 +1,32 @@
 "use client";
 
-import { Badge } from "@/components/ui/badge";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+
+const EMBED_MODELS = ["mxbai-embed-large", "nomic-embed-text"];
 
 interface HeaderProps {
   backendStatus: "connected" | "disconnected" | "checking";
+  models: string[];
+  selectedModel: string;
+  onModelChange: (model: string) => void;
 }
 
-export function Header({ backendStatus }: HeaderProps) {
+export function Header({
+  backendStatus,
+  models,
+  selectedModel,
+  onModelChange,
+}: HeaderProps) {
+  const chatModels = models.filter(
+    (m) => !EMBED_MODELS.some((em) => m.startsWith(em)),
+  );
+
   return (
     <header className="border-b border-border bg-card px-6 py-3 flex items-center justify-between">
       <div className="flex items-center gap-3">
@@ -28,9 +48,18 @@ export function Header({ backendStatus }: HeaderProps) {
             CAD RAG Assistant
           </h1>
         </div>
-        <Badge variant="secondary" className="text-xs font-mono">
-          qwen3.5:27b
-        </Badge>
+        <Select value={selectedModel} onValueChange={(v) => v && onModelChange(v)}>
+          <SelectTrigger className="w-[200px] h-8 text-xs font-mono">
+            <SelectValue placeholder="모델 선택" />
+          </SelectTrigger>
+          <SelectContent>
+            {chatModels.map((model) => (
+              <SelectItem key={model} value={model} className="text-xs font-mono">
+                {model}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       </div>
       <div className="flex items-center gap-2">
         <div
