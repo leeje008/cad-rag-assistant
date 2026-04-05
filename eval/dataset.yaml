@@ -1,0 +1,106 @@
+# CAD RAG Assistant 평가셋 초안 (Claude 생성, 사용자 검수 필요)
+#
+# 필드:
+#   id             — 안정적인 식별자
+#   question       — 사용자 질의 (한국어/영어 자유)
+#   expected_doc   — 기대 출처 문서 파일명 (부분 일치 허용)
+#   expected_section — (선택) 기대 섹션/시트명
+#   reference      — (선택) Ragas context_recall 계산용 정답 문장
+#
+# 30문항: DOSH(4) / Nozzle Load(5) / P&ID(4) / PTS & IOGP(4) / MR Appendix(4)
+#         / Waste Water Treatment(3) / Spray Nozzle(2) / Vendor Print(2) / 일반 2
+
+- id: dosh-01
+  question: DOSH 인증을 받아야 하는 장비는 누가 승인을 받아야 하는가?
+  expected_doc: DOSH Requirement
+- id: dosh-02
+  question: DOSH 비용은 누구 부담인가?
+  expected_doc: DOSH Requirement
+- id: dosh-03
+  question: Professional Engineer가 endorse한 도면은 어디에 제출되는가?
+  expected_doc: DOSH Requirement
+- id: dosh-04
+  question: Vendor가 Samsung 지원 없이 진행할 경우 상태 보고 주기는?
+  expected_doc: DOSH Requirement
+
+- id: nozzle-01
+  question: Equipment Nozzle Load 설계 기준은 무엇인가?
+  expected_doc: Nozzle Load
+- id: nozzle-02
+  question: 노즐 허용 하중 기준표에 포함된 축 방향은 몇 가지인가?
+  expected_doc: Nozzle Load
+- id: nozzle-03
+  question: Nozzle load specification for horizontal vessel
+  expected_doc: Nozzle Load
+- id: nozzle-04
+  question: 노즐 설계에서 moment와 force 한계는 어떻게 제시되는가?
+  expected_doc: Nozzle Load
+- id: nozzle-05
+  question: Vessel nozzle load design criteria table
+  expected_doc: Nozzle Load
+
+- id: pid-01
+  question: P&ID 심볼 범례에서 Check Valve는 어떻게 표시되는가?
+  expected_doc: P&ID
+- id: pid-02
+  question: Process and Instrumentation Diagram symbol legend
+  expected_doc: P&ID
+- id: pid-03
+  question: P&ID에서 control valve와 isolation valve 기호 차이는?
+  expected_doc: P&ID
+- id: pid-04
+  question: 바인더에 포함된 P&ID Symbol & Legend 개정일은?
+  expected_doc: P&ID Symbol
+
+- id: pts-01
+  question: Applicable Project Specifications and Engineering Standards 목록
+  expected_doc: MR Appendix-2
+- id: pts-02
+  question: PTS SPEC에서 인용하는 IOGP JIP33 표준은?
+  expected_doc: IOGP JIP33
+- id: pts-03
+  question: General Requirements for Vessel 주요 조항 요약
+  expected_doc: General requirement for Vessel
+- id: pts-04
+  question: IOGP JIP33 Code and Standard 적용 범위
+
+- id: mr-01
+  question: Vendor Print Index and Schedule의 기본 포맷은?
+  expected_doc: MR Appendix-4
+- id: mr-02
+  question: Deviation Exception List 포맷을 작성하는 목적
+  expected_doc: MR Appendix-3
+- id: mr-03
+  question: General Requirements for Requisition 핵심 조항
+  expected_doc: MR Appendix-1
+- id: mr-04
+  question: Attachment #4 Standard Format of Vendor Print 필드 구성
+
+- id: www-01
+  question: Waste Water Treatment PKG 설계 사양 요약
+  expected_doc: Waste Water Treatment
+- id: www-02
+  question: SAF RFQ 패키지의 Quality와 Requirement 차이
+  expected_doc: SAF RFQ
+- id: www-03
+  question: Hyorim E&I 피드백 250509 주요 지적 사항
+  expected_doc: Hyorim
+
+- id: nozzle-spray-01
+  question: Spray Nozzle 분사각과 유량 관계
+  expected_doc: Spray Nozzle
+- id: nozzle-spray-02
+  question: Spray Nozzle 재질 선정 기준
+  expected_doc: Spray Nozzle
+
+- id: vendor-print-01
+  question: Attachment #4 Standard Format of Vendor Print 의 열 구성
+  expected_doc: Attachment #4
+- id: vendor-print-02
+  question: Master BM_List 의 포함 항목
+
+- id: general-01
+  question: Inspection Test Plan 절차 개요
+- id: general-02
+  question: Vendor Subvendor List 최신 개정판
+  expected_doc: AVL_Subvendor

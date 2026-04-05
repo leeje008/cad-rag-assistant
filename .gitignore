@@ -43,5 +43,9 @@ backend/.lancedb/
 # Logs
 *.log
 
+# Eval results (per-run JSON/CSV, keep dataset.yaml)
+eval/results_*.json
+eval/results_*.csv
+
 # Vercel
 .vercel
