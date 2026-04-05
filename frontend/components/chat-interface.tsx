@@ -24,12 +24,25 @@ export function ChatInterface({ selectedModel }: ChatInterfaceProps) {
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
   }, [messages]);
+
+  useEffect(() => {
+    return () => {
+      abortRef.current?.abort();
+    };
+  }, []);
+
+  function stopStreaming() {
+    abortRef.current?.abort();
+    abortRef.current = null;
+    setIsLoading(false);
+  }
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -52,11 +65,18 @@ export function ChatInterface({ selectedModel }: ChatInterfaceProps) {
     setInput("");
     setIsLoading(true);
 
+    // Abort any in-flight request (shouldn't happen because of the
+    // isLoading guard, but defensive).
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+
     try {
       const response = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ message: trimmed, model: selectedModel }),
+        signal: controller.signal,
       });
 
       if (!response.ok) throw new Error("Failed to fetch response");
@@ -107,16 +127,25 @@ export function ChatInterface({ selectedModel }: ChatInterfaceProps) {
         }
       }
     } catch (error) {
+      const aborted = error instanceof Error && error.name === "AbortError";
       setMessages((prev) => {
         const updated = [...prev];
         const last = updated[updated.length - 1];
         if (last.role === "assistant") {
-          last.content =
-            "죄송합니다. 백엔드 서버에 연결할 수 없습니다. Ollama와 FastAPI 서버가 실행 중인지 확인해주세요.";
+          if (aborted) {
+            // Keep whatever we already streamed; just append a marker.
+            last.content = last.content
+              ? `${last.content}\n\n*[중단됨]*`
+              : "*[중단됨]*";
+          } else {
+            last.content =
+              "죄송합니다. 백엔드 서버에 연결할 수 없습니다. Ollama와 FastAPI 서버가 실행 중인지 확인해주세요.";
+          }
         }
         return updated;
       });
     } finally {
+      abortRef.current = null;
       setIsLoading(false);
     }
   }
@@ -201,6 +230,16 @@ export function ChatInterface({ selectedModel }: ChatInterfaceProps) {
             disabled={isLoading}
             className="flex-1"
           />
+          {isLoading && (
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={stopStreaming}
+              aria-label="스트리밍 중단"
+            >
+              중단
+            </Button>
+          )}
           <Button type="submit" disabled={isLoading || !input.trim()}>
             {isLoading ? (
               <svg
