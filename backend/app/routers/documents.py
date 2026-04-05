@@ -1,19 +1,24 @@
-from fastapi import APIRouter
+from __future__ import annotations
 
-from ..services.llm import list_models, check_ollama_health
+from fastapi import APIRouter, Request
+
 from ..models.schemas import HealthResponse
+from ..services.llm import check_ollama_health, list_models
 
 router = APIRouter()
 
 
 @router.get("/api/health", response_model=HealthResponse)
-async def health():
-    """Health check endpoint."""
-    ollama_ok = await check_ollama_health()
-    models = []
+async def health(request: Request):
+    client = request.app.state.http
+    ollama_ok = await check_ollama_health(client)
+    models: list[str] = []
     if ollama_ok:
-        model_list = await list_models()
-        models = [m["name"] for m in model_list]
+        try:
+            raw = await list_models(client)
+            models = [m["name"] for m in raw]
+        except Exception:  # noqa: BLE001
+            models = []
 
     return HealthResponse(
         status="ok" if ollama_ok else "degraded",
@@ -23,7 +28,11 @@ async def health():
 
 
 @router.get("/api/models")
-async def get_models():
-    """List available Ollama models."""
-    models = await list_models()
-    return {"models": [{"name": m["name"], "size": str(m.get("size", ""))} for m in models]}
+async def get_models(request: Request):
+    client = request.app.state.http
+    models = await list_models(client)
+    return {
+        "models": [
+            {"name": m["name"], "size": str(m.get("size", ""))} for m in models
+        ]
+    }

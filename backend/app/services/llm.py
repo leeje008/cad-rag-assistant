@@ -1,46 +1,90 @@
+"""Ollama chat/embedding/health helpers that share a single httpx client.
+
+The client is created once in `main.lifespan` and stashed on
+`app.state.http`. Routers pass it explicitly so nothing here owns the
+lifecycle.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+from collections.abc import AsyncIterator
+
 import httpx
 
-from ..config import OLLAMA_BASE_URL, LLM_MODEL, SYSTEM_PROMPT
+from .settings import SYSTEM_PROMPT_BASE, SYSTEM_PROMPT_WITH_CONTEXT, settings
+
+logger = logging.getLogger(__name__)
 
 
-async def stream_chat(message: str, model: str | None = None):
-    """Stream a chat response from Ollama."""
-    model = model or LLM_MODEL
+def _build_system_prompt(context: str | None) -> str:
+    if context and context.strip():
+        return SYSTEM_PROMPT_WITH_CONTEXT.format(context=context)
+    return SYSTEM_PROMPT_BASE
+
+
+async def stream_chat(
+    client: httpx.AsyncClient,
+    message: str,
+    *,
+    model: str | None = None,
+    context: str | None = None,
+    history: list[dict] | None = None,
+) -> AsyncIterator[str]:
+    """Stream raw JSON lines from Ollama.
+
+    The caller decides how to translate them into the Vercel AI SDK data
+    stream protocol.
+    """
+
+    selected_model = model or settings.llm_model
+    messages: list[dict] = [
+        {"role": "system", "content": _build_system_prompt(context)},
+    ]
+    if history:
+        messages.extend(history)
+    messages.append({"role": "user", "content": message})
+
     payload = {
-        "model": model,
-        "messages": [
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": message},
-        ],
+        "model": selected_model,
+        "messages": messages,
         "stream": True,
     }
 
-    async with httpx.AsyncClient(timeout=httpx.Timeout(300.0)) as client:
+    try:
         async with client.stream(
             "POST",
-            f"{OLLAMA_BASE_URL}/api/chat",
+            f"{settings.ollama_base_url}/api/chat",
             json=payload,
         ) as response:
             response.raise_for_status()
             async for line in response.aiter_lines():
                 if line.strip():
                     yield line
+    except asyncio.CancelledError:
+        logger.info("stream_chat cancelled by client disconnect")
+        raise
+    except httpx.HTTPError as exc:
+        logger.exception("Ollama chat request failed: %s", exc)
+        raise
 
 
-async def list_models() -> list[dict]:
-    """List available Ollama models."""
-    async with httpx.AsyncClient(timeout=httpx.Timeout(10.0)) as client:
-        resp = await client.get(f"{OLLAMA_BASE_URL}/api/tags")
-        resp.raise_for_status()
-        data = resp.json()
-        return data.get("models", [])
+async def list_models(client: httpx.AsyncClient) -> list[dict]:
+    resp = await client.get(
+        f"{settings.ollama_base_url}/api/tags",
+        timeout=httpx.Timeout(10.0),
+    )
+    resp.raise_for_status()
+    return resp.json().get("models", [])
 
 
-async def check_ollama_health() -> bool:
-    """Check if Ollama is running."""
+async def check_ollama_health(client: httpx.AsyncClient) -> bool:
     try:
-        async with httpx.AsyncClient(timeout=httpx.Timeout(5.0)) as client:
-            resp = await client.get(f"{OLLAMA_BASE_URL}/api/tags")
-            return resp.status_code == 200
-    except (httpx.ConnectError, httpx.TimeoutException):
+        resp = await client.get(
+            f"{settings.ollama_base_url}/api/tags",
+            timeout=httpx.Timeout(5.0),
+        )
+        return resp.status_code == 200
+    except (httpx.ConnectError, httpx.TimeoutException, httpx.HTTPError):
         return False
