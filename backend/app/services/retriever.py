@@ -25,6 +25,19 @@ logger = logging.getLogger(__name__)
 _PARENT_FILTER = "chunk_type != 'parent'"
 
 
+def _has_hierarchy(table) -> bool:
+    """True if the table carries the Phase-A schema (chunk_type column).
+
+    Lets the retriever degrade to the legacy text path against a pre-reindex
+    table instead of raising on a WHERE over a missing column.
+    """
+
+    try:
+        return "chunk_type" in table.schema.names
+    except Exception:  # noqa: BLE001
+        return False
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 
@@ -200,9 +213,11 @@ async def retrieve(
 
     top_k = k or settings.top_k
     vector = await embed_query(client, query)
-    rows = search(table, vector, top_k, where=_PARENT_FILTER)
-    rows = _expand_to_parents(table, rows)
-    rows = _resolve_table_summaries(table, rows)
+    has_hier = _has_hierarchy(table)
+    rows = search(table, vector, top_k, where=_PARENT_FILTER if has_hier else None)
+    if has_hier:
+        rows = _expand_to_parents(table, rows)
+        rows = _resolve_table_summaries(table, rows)
     return [_row_to_source(r) for r in rows]
 
 
@@ -230,14 +245,19 @@ async def retrieve_hybrid(
     cand = candidate_n or settings.rerank_candidate_n
     rerank = settings.use_reranker if use_reranker is None else use_reranker
 
+    # Pre-reindex tables lack the hierarchy columns — degrade to the plain
+    # text path (no parent filter/expansion) instead of erroring on WHERE.
+    has_hier = _has_hierarchy(table)
+    parent_filter = _PARENT_FILTER if has_hier else None
+
     # Dense (parents excluded — they are expansion targets, not candidates)
     vector = await embed_query(client, query)
-    dense_rows = search(table, vector, cand, where=_PARENT_FILTER)
+    dense_rows = search(table, vector, cand, where=parent_filter)
 
     # Lexical
     fts_rows: list[dict[str, Any]] = []
     if settings.use_hybrid:
-        fts_rows = search_fts(table, query, cand, where=_PARENT_FILTER)
+        fts_rows = search_fts(table, query, cand, where=parent_filter)
 
     # Fuse
     fused = _rrf_merge([dense_rows, fts_rows])[: max(cand, final_k)]
@@ -264,10 +284,12 @@ async def retrieve_hybrid(
             row["_relevance"] = row.get("_rrf")
 
     # Distinct sections/tables: collapse redundant hits before slicing.
-    fused = _dedupe(fused)
+    if has_hier:
+        fused = _dedupe(fused)
     top = fused[:final_k]
-    top = _expand_to_parents(table, top)
-    top = _resolve_table_summaries(table, top)
+    if has_hier:
+        top = _expand_to_parents(table, top)
+        top = _resolve_table_summaries(table, top)
     return [_row_to_source(r) for r in top]
 
 
