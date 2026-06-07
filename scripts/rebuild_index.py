@@ -30,8 +30,8 @@ import httpx  # noqa: E402
 import lancedb  # noqa: E402
 
 from app.services.chunker import chunk_parsed  # noqa: E402
-from app.services.embedder import embed_texts  # noqa: E402
 from app.services.parsers import SUPPORTED_SUFFIXES, parse_any  # noqa: E402
+from app.services.pipeline import build_chunks_and_vectors  # noqa: E402
 from app.services.settings import settings  # noqa: E402
 from app.services.vectorstore import (  # noqa: E402
     _schema,
@@ -94,24 +94,27 @@ async def _run(path: Path, dry_run: bool) -> int:
                     logger.warning("[%d/%d] %s: no content", i, len(files), file_path.name)
                     continue
 
-                chunks = chunk_parsed(
-                    doc,
-                    max_chars=settings.chunk_max_chars,
-                    min_chars=settings.chunk_min_chars,
-                    overlap=settings.chunk_overlap,
-                )
-                if not chunks:
-                    errors.append(f"{file_path.name}: 0 chunks")
-                    continue
-
                 if dry_run:
+                    # Parse/chunk only — skip the LLM enrichment + embed stages.
+                    chunks = chunk_parsed(
+                        doc,
+                        max_chars=settings.chunk_max_chars,
+                        min_chars=settings.chunk_min_chars,
+                        overlap=settings.chunk_overlap,
+                    )
+                    if not chunks:
+                        errors.append(f"{file_path.name}: 0 chunks")
+                        continue
                     total_chunks += len(chunks)
                     logger.info(
                         "[%d/%d] DRY %s → %d chunks", i, len(files), file_path.name, len(chunks)
                     )
                     continue
 
-                vectors = await embed_texts(client, [c.text for c in chunks])
+                chunks, vectors = await build_chunks_and_vectors(client, doc)
+                if not chunks:
+                    errors.append(f"{file_path.name}: 0 chunks")
+                    continue
                 upsert_chunks(staging_table, chunks, vectors)
                 total_chunks += len(chunks)
                 dt = time.perf_counter() - t0

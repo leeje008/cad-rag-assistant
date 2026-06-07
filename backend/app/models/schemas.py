@@ -36,6 +36,9 @@ class Source(BaseModel):
     text: str = ""
     source_path: str = ""
     chunk_id: str = ""
+    chunk_type: str = "text"
+    table_id: str | None = None
+    parent_id: str | None = None
 
 
 class IngestRequest(BaseModel):

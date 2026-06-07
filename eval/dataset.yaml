@@ -29,6 +29,7 @@
 - id: nozzle-02
   question: 노즐 허용 하중 기준표에 포함된 축 방향은 몇 가지인가?
   expected_doc: Nozzle Load
+  tags: [table]
 - id: nozzle-03
   question: Nozzle load specification for horizontal vessel
   expected_doc: Nozzle Load
@@ -38,16 +39,20 @@
 - id: nozzle-05
   question: Vessel nozzle load design criteria table
   expected_doc: Nozzle Load
+  tags: [table]
 
 - id: pid-01
   question: P&ID 심볼 범례에서 Check Valve는 어떻게 표시되는가?
   expected_doc: P&ID
+  tags: [image, symbol]
 - id: pid-02
   question: Process and Instrumentation Diagram symbol legend
   expected_doc: P&ID
+  tags: [image, symbol]
 - id: pid-03
   question: P&ID에서 control valve와 isolation valve 기호 차이는?
   expected_doc: P&ID
+  tags: [image, symbol]
 - id: pid-04
   question: 바인더에 포함된 P&ID Symbol & Legend 개정일은?
   expected_doc: P&ID Symbol

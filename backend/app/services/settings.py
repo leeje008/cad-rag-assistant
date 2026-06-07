@@ -50,7 +50,7 @@ class Settings(BaseSettings):
     ollama_base_url: str = "http://localhost:11434"
     llm_model: str = "qwen3.5:27b"
     embed_model: str = "bge-m3"
-    vision_model: str = "gemma4:e4b"
+    vision_model: str = "qwen2.5vl"
     fallback_llm_model: str = "llama3.1:8b"
     embed_dimension: int = 1024
     embed_batch: int = 16
@@ -74,11 +74,22 @@ class Settings(BaseSettings):
     ollama_write_timeout: float = 30.0
     ollama_pool_timeout: float = 5.0
 
+    # Parsing — Phase A (Docling)
+    use_docling: bool = True  # Docling primary, pymupdf4llm fallback on failure
+    docling_do_ocr: bool = True  # OCR scanned P&ID/drawings (slow, no GPU)
+    docling_images_scale: float = 2.0  # render scale for extracted figure images
+    # MinerU option for CJK multi-header docs — not implemented this round.
+
     # RAG — chunker
     chunk_max_chars: int = 1500
     chunk_min_chars: int = 400
     chunk_overlap: int = 150
     top_k: int = 5
+
+    # Ingest enrichment (LLM stages — one-off batch cost)
+    use_table_summary: bool = True  # PR4: dual table representation
+    use_contextual: bool = True  # PR5: per-section contextual prepend
+    use_vlm_caption: bool = True  # PR6: VLM image captions
 
     # Storage paths
     spec_dir: Path = _REPO_ROOT / "SPEC"
