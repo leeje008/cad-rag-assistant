@@ -70,6 +70,39 @@ def retrieval_hit(
     return False
 
 
+def _hit_rate(results: list[dict[str, Any]]) -> float:
+    return sum(1 for r in results if r["retrieval_hit"]) / max(1, len(results))
+
+
+def _hit_rate_by_tag(results: list[dict[str, Any]]) -> dict[str, float]:
+    """Hit-rate sliced by tag (e.g. table/image/symbol)."""
+
+    buckets: dict[str, list[dict[str, Any]]] = {}
+    for r in results:
+        for tag in r.get("tags") or ["untagged"]:
+            buckets.setdefault(tag, []).append(r)
+    return {tag: _hit_rate(rs) for tag, rs in sorted(buckets.items())}
+
+
+def _typed_retrieval_rate(
+    results: list[dict[str, Any]], *, tag: str, types: tuple[str, ...]
+) -> float | None:
+    """Fraction of `tag`-tagged questions whose results include a `types` chunk.
+
+    Proves multimodal chunks are actually retrievable. None if no such Qs.
+    """
+
+    tagged = [r for r in results if tag in (r.get("tags") or [])]
+    if not tagged:
+        return None
+    hits = sum(
+        1
+        for r in tagged
+        if any((s.get("chunk_type") or "text") in types for s in r["retrieved"])
+    )
+    return hits / len(tagged)
+
+
 async def _collect_stream(client, query: str, context: str) -> str:
     """Run the full chat stream into a single string (no `s:` prefix here)."""
 
@@ -112,6 +145,7 @@ async def run(args: argparse.Namespace) -> int:
             expected_doc = item.get("expected_doc")
             expected_section = item.get("expected_section")
             reference = item.get("reference")
+            tags = item.get("tags") or []
 
             t0 = time.perf_counter()
             variants = await expand_queries(client, question)
@@ -126,7 +160,12 @@ async def run(args: argparse.Namespace) -> int:
                     candidate_n=settings.rerank_candidate_n,
                 )
                 for s in hits:
-                    key = s.chunk_id or f"{s.document}:{s.page}"
+                    if s.chunk_type == "text" and s.parent_id:
+                        key = f"p:{s.parent_id}"
+                    elif s.chunk_type in ("table", "table_summary") and s.table_id:
+                        key = f"t:{s.table_id}"
+                    else:
+                        key = s.chunk_id or f"{s.document}:{s.page}"
                     if key not in seen:
                         seen[key] = s
                         order.append(key)
@@ -164,6 +203,7 @@ async def run(args: argparse.Namespace) -> int:
                     "expected_doc": expected_doc,
                     "expected_section": expected_section,
                     "reference": reference,
+                    "tags": tags,
                     "retrieved": [
                         {
                             "document": s.document,
@@ -171,6 +211,7 @@ async def run(args: argparse.Namespace) -> int:
                             "section": s.section,
                             "relevance": s.relevance,
                             "chunk_id": s.chunk_id,
+                            "chunk_type": s.chunk_type,
                         }
                         for s in sources
                     ],
@@ -199,8 +240,13 @@ async def run(args: argparse.Namespace) -> int:
 
     summary = {
         "total": len(results),
-        "hit_rate": (
-            sum(1 for r in results if r["retrieval_hit"]) / max(1, len(results))
+        "hit_rate": _hit_rate(results),
+        "hit_rate_by_tag": _hit_rate_by_tag(results),
+        "table_q_retrieved_table_chunk_rate": _typed_retrieval_rate(
+            results, tag="table", types=("table", "table_summary")
+        ),
+        "image_q_retrieved_image_chunk_rate": _typed_retrieval_rate(
+            results, tag="image", types=("image",)
         ),
         "avg_retrieval_ms": sum(r["retrieval_ms"] for r in results) / max(1, len(results)),
         "avg_generation_ms": sum(r["generation_ms"] for r in results) / max(1, len(results)),
@@ -210,6 +256,10 @@ async def run(args: argparse.Namespace) -> int:
         "use_hybrid": settings.use_hybrid,
         "use_reranker": settings.use_reranker,
         "use_multi_query": settings.use_multi_query,
+        "use_docling": settings.use_docling,
+        "use_contextual": settings.use_contextual,
+        "use_table_summary": settings.use_table_summary,
+        "use_vlm_caption": settings.use_vlm_caption,
     }
 
     json_path.write_text(
@@ -239,6 +289,52 @@ async def run(args: argparse.Namespace) -> int:
     print(json.dumps(summary, ensure_ascii=False, indent=2))
     print(f"\nresults → {json_path.relative_to(REPO_ROOT)}")
     print(f"csv     → {csv_path.relative_to(REPO_ROOT)}")
+
+    if args.gate:
+        return _check_gate(summary, update=args.update_baseline)
+    return 0
+
+
+def _check_gate(summary: dict[str, Any], *, update: bool, tol: float = 0.001) -> int:
+    """Compare against eval/baseline.json; non-zero exit on regression.
+
+    First run (or --update-baseline) writes the baseline and passes. Each
+    Phase must clear this gate before its reindex is promoted.
+    """
+
+    baseline_path = REPO_ROOT / "eval" / "baseline.json"
+    if update or not baseline_path.exists():
+        baseline_path.write_text(
+            json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+        print(f"\n[gate] baseline {'updated' if update else 'established'} → {baseline_path.name}")
+        return 0
+
+    base = json.loads(baseline_path.read_text(encoding="utf-8"))
+    regressions: list[str] = []
+
+    def check(name: str, cur: float | None, prev: float | None) -> None:
+        if cur is None or prev is None:
+            return
+        if cur < prev - tol:
+            regressions.append(f"{name}: {prev:.3f} → {cur:.3f}")
+
+    check("hit_rate", summary.get("hit_rate"), base.get("hit_rate"))
+    cur_tags = summary.get("hit_rate_by_tag", {})
+    for tag, prev in (base.get("hit_rate_by_tag") or {}).items():
+        check(f"hit_rate[{tag}]", cur_tags.get(tag), prev)
+    check(
+        "context_recall",
+        (summary.get("ragas") or {}).get("context_recall"),
+        (base.get("ragas") or {}).get("context_recall"),
+    )
+
+    if regressions:
+        print("\n[gate] ❌ FAIL — regressions vs baseline:")
+        for r in regressions:
+            print(f"  - {r}")
+        return 1
+    print("\n[gate] ✅ PASS — no regression vs baseline")
     return 0
 
 
@@ -258,20 +354,29 @@ async def _run_ragas(
         from langchain_openai import ChatOpenAI
         from ragas import EvaluationDataset, SingleTurnSample, evaluate
         from ragas.llms import LangchainLLMWrapper
-        from ragas.metrics import AnswerRelevancy, Faithfulness
+        from ragas.metrics import (
+            AnswerRelevancy,
+            Faithfulness,
+            LLMContextRecall,
+        )
     except ImportError as exc:
         logger.warning("ragas unavailable: %s", exc)
         return {}
 
     samples: list[SingleTurnSample] = []
+    has_reference = False
     for r in results:
         if not r.get("answer") or not r.get("retrieved_text"):
             continue
+        reference = r.get("reference")
+        if reference:
+            has_reference = True
         samples.append(
             SingleTurnSample(
                 user_input=r["question"],
                 retrieved_contexts=r["retrieved_text"],
                 response=r["answer"],
+                reference=reference or None,
             )
         )
     if not samples:
@@ -296,18 +401,21 @@ async def _run_ragas(
     judge_llm = LangchainLLMWrapper(chat_llm)
     dataset = EvaluationDataset(samples=samples)
 
+    metrics = [Faithfulness(), AnswerRelevancy()]
+    metric_names = ["faithfulness", "answer_relevancy"]
+    # context_recall needs ground-truth references; only run it when present.
+    if has_reference:
+        metrics.append(LLMContextRecall())
+        metric_names.append("context_recall")
+
     try:
-        report = evaluate(
-            dataset=dataset,
-            metrics=[Faithfulness(), AnswerRelevancy()],
-            llm=judge_llm,
-        )
+        report = evaluate(dataset=dataset, metrics=metrics, llm=judge_llm)
     except Exception as exc:  # noqa: BLE001
         logger.exception("ragas evaluate() raised: %s", exc)
         return {}
 
     scores: dict[str, float] = {}
-    for metric_name in ("faithfulness", "answer_relevancy"):
+    for metric_name in metric_names:
         try:
             scores[metric_name] = float(report[metric_name])  # type: ignore[index]
         except Exception:  # noqa: BLE001
@@ -327,6 +435,16 @@ def main() -> int:
     )
     ap.add_argument("--only-retrieval", action="store_true", help="skip LLM generation + ragas")
     ap.add_argument("--no-ragas", action="store_true", help="skip ragas but keep LLM generation")
+    ap.add_argument(
+        "--gate",
+        action="store_true",
+        help="compare to eval/baseline.json; exit non-zero on regression",
+    )
+    ap.add_argument(
+        "--update-baseline",
+        action="store_true",
+        help="with --gate, overwrite the baseline with this run",
+    )
     args = ap.parse_args()
     return asyncio.run(run(args))
 

@@ -16,9 +16,8 @@ from typing import Literal
 
 import httpx
 
-from .chunker import chunk_parsed
-from .embedder import embed_texts
 from .parsers import SUPPORTED_SUFFIXES, parse_any
+from .pipeline import build_chunks_and_vectors
 from .settings import settings
 from .vectorstore import upsert_chunks
 
@@ -103,18 +102,12 @@ async def run_ingest(
                     job.processed += 1
                     continue
 
-                chunks = chunk_parsed(
-                    doc,
-                    max_chars=settings.chunk_max_chars,
-                    min_chars=settings.chunk_min_chars,
-                    overlap=settings.chunk_overlap,
-                )
+                chunks, vectors = await build_chunks_and_vectors(client, doc)
                 if not chunks:
                     job.errors.append(f"{file_path.name}: chunker produced 0 chunks")
                     job.processed += 1
                     continue
 
-                vectors = await embed_texts(client, [c.text for c in chunks])
                 upsert_chunks(table, chunks, vectors)
                 job.processed += 1
                 logger.info(

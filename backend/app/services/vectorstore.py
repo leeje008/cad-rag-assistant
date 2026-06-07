@@ -35,6 +35,15 @@ def _schema(dim: int) -> pa.Schema:
             pa.field("page", pa.int32()),
             pa.field("char_start", pa.int32()),
             pa.field("char_end", pa.int32()),
+            pa.field("chunk_type", pa.string()),
+            pa.field("parent_id", pa.string()),
+            pa.field("table_id", pa.string()),
+            pa.field("figure_id", pa.string()),
+            pa.field("level", pa.int32()),
+            pa.field("table_html", pa.string()),
+            # Variable-size list (NOT fixed) so LanceDB never mistakes bbox
+            # for a vector column during vector-search column inference.
+            pa.field("bbox", pa.list_(pa.float32())),
             pa.field("vector", pa.list_(pa.float32(), dim)),
         ]
     )
@@ -108,6 +117,15 @@ def upsert_chunks(table, chunks: list[Chunk], vectors: list[list[float]]) -> int
                 "page": chunk.page if chunk.page is not None else -1,
                 "char_start": chunk.char_start,
                 "char_end": chunk.char_end,
+                "chunk_type": chunk.chunk_type or "text",
+                "parent_id": chunk.parent_id or "",
+                "table_id": chunk.table_id or "",
+                "figure_id": chunk.figure_id or "",
+                "level": chunk.level,
+                "table_html": chunk.table_html or "",
+                "bbox": [float(b) for b in chunk.bbox]
+                if chunk.bbox is not None
+                else [-1.0, -1.0, -1.0, -1.0],
                 "vector": [float(v) for v in vec],
             }
         )
@@ -116,12 +134,17 @@ def upsert_chunks(table, chunks: list[Chunk], vectors: list[list[float]]) -> int
     return len(rows)
 
 
-def search(table, query_vector: list[float], k: int) -> list[dict[str, Any]]:
+def search(
+    table, query_vector: list[float], k: int, *, where: str | None = None
+) -> list[dict[str, Any]]:
     """Dense-only vector search (kept for the legacy retriever path)."""
 
     if table is None:
         return []
-    result = table.search(query_vector).limit(k).to_list()
+    q = table.search(query_vector, vector_column_name="vector")
+    if where:
+        q = q.where(where, prefilter=True)
+    result = q.limit(k).to_list()
     for row in result:
         distance = row.get("_distance")
         if distance is None:
@@ -131,7 +154,9 @@ def search(table, query_vector: list[float], k: int) -> list[dict[str, Any]]:
     return result
 
 
-def search_fts(table, query: str, k: int) -> list[dict[str, Any]]:
+def search_fts(
+    table, query: str, k: int, *, where: str | None = None
+) -> list[dict[str, Any]]:
     """Lexical (BM25 via Tantivy) search over the kiwi-tokenised column.
 
     Returns rows with a `_score` field (higher is better).
@@ -143,11 +168,10 @@ def search_fts(table, query: str, k: int) -> list[dict[str, Any]]:
     if not tokenised_query:
         return []
     try:
-        result = (
-            table.search(tokenised_query, query_type="fts", fts_columns="text_fts")
-            .limit(k)
-            .to_list()
-        )
+        q = table.search(tokenised_query, query_type="fts", fts_columns="text_fts")
+        if where:
+            q = q.where(where)
+        result = q.limit(k).to_list()
     except Exception as exc:  # noqa: BLE001
         logger.warning("FTS search failed, returning empty: %s", exc)
         return []

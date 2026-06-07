@@ -33,7 +33,14 @@ async def _multi_query_retrieve(client, table, query: str) -> list[Source]:
             candidate_n=settings.rerank_candidate_n,
         )
         for s in hits:
-            key = s.chunk_id or f"{s.document}:{s.page}"
+            # Across variants: collapse text children by section (parent_id)
+            # and table/table_summary by table_id; else key by chunk_id.
+            if s.chunk_type == "text" and s.parent_id:
+                key = f"p:{s.parent_id}"
+            elif s.chunk_type in ("table", "table_summary") and s.table_id:
+                key = f"t:{s.table_id}"
+            else:
+                key = s.chunk_id or f"{s.document}:{s.page}"
             if key in seen:
                 # Keep the highest relevance seen across variants.
                 existing = seen[key]

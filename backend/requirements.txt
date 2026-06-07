@@ -9,6 +9,9 @@ pymupdf4llm==0.0.17
 pymupdf==1.24.14
 openpyxl==3.1.5
 pandas==2.2.3
+
+# Parsing — Phase A (structure/table/image-aware; pymupdf4llm kept as fallback)
+docling==2.97.0
 numpy<2.2,>=1.26
 lancedb==0.15.0
 pyarrow==17.0.0
