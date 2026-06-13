@@ -24,6 +24,12 @@ logger = logging.getLogger(__name__)
 # Parent chunks exist only as expansion targets — never ranked directly.
 _PARENT_FILTER = "chunk_type != 'parent'"
 
+# table_html beyond this travels poorly in the single-line `s:` stream part;
+# the frontend falls back to the markdown text.
+_TABLE_HTML_MAX_CHARS = 20_000
+
+_NO_BBOX = [-1.0, -1.0, -1.0, -1.0]
+
 
 def _has_hierarchy(table) -> bool:
     """True if the table carries the Phase-A schema (chunk_type column).
@@ -54,6 +60,14 @@ def _row_to_source(row: dict[str, Any]) -> Source:
         or row.get("_parent_text")
         or row.get("text", "")
     )
+    bbox_val = row.get("bbox")
+    bbox = [float(b) for b in bbox_val] if bbox_val is not None else None
+    if not bbox or bbox == _NO_BBOX:
+        bbox = None
+    table_html = row.get("table_html") or None
+    if table_html and len(table_html) > _TABLE_HTML_MAX_CHARS:
+        table_html = None
+    image_path = row.get("image_path") or ""
     return Source(
         document=row.get("title", ""),
         page=page_val,
@@ -65,6 +79,10 @@ def _row_to_source(row: dict[str, Any]) -> Source:
         chunk_type=row.get("chunk_type") or "text",
         table_id=row.get("table_id") or None,
         parent_id=row.get("parent_id") or None,
+        figure_id=row.get("figure_id") or None,
+        bbox=bbox,
+        image_url=f"/api/assets/{image_path}" if image_path else None,
+        table_html=table_html,
     )
 
 
@@ -282,6 +300,21 @@ async def retrieve_hybrid(
     else:
         for row in fused:
             row["_relevance"] = row.get("_rrf")
+
+    # C6 pilot: fuse ColQwen page-image hits AFTER the cross-encoder pass —
+    # a text reranker cannot score images, so fusion happens on ranks.
+    if settings.use_colqwen_pages:
+        from .colqwen_index import search_pages
+
+        page_rows = search_pages(query)
+        if page_rows:
+            fused = _rrf_merge([fused, page_rows])
+            # Re-fusion reorders by the combined RRF score, so the prior
+            # rerank-based relevance no longer matches the row order. Align
+            # displayed relevance to the fused score for every row, putting
+            # text and page-image hits on one consistent scale.
+            for row in fused:
+                row["_relevance"] = row.get("_rrf")
 
     # Distinct sections/tables: collapse redundant hits before slicing.
     if has_hier:

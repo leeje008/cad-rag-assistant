@@ -7,7 +7,7 @@ import httpx
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from .routers import chat, documents, ingest, retrieve
+from .routers import assets, chat, documents, ingest, retrieve
 from .services.settings import settings
 from .services.vectorstore import ensure_fts_index, open_or_create_table
 
@@ -66,6 +66,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(assets.router)
 app.include_router(chat.router)
 app.include_router(documents.router)
 app.include_router(ingest.router)

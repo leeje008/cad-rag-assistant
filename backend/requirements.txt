@@ -25,3 +25,8 @@ tantivy==0.25.1
 ragas==0.4.3
 langchain-openai==1.1.12
 PyYAML>=6.0
+
+# --- Optional: ColQwen page-image pilot (C6, use_colqwen_pages) ---
+# Install only when running scripts/build_colqwen_index.py:
+# colpali-engine>=0.3.8
+# torch>=2.4

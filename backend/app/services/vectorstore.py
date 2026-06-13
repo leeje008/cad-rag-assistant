@@ -41,6 +41,7 @@ def _schema(dim: int) -> pa.Schema:
             pa.field("figure_id", pa.string()),
             pa.field("level", pa.int32()),
             pa.field("table_html", pa.string()),
+            pa.field("image_path", pa.string()),
             # Variable-size list (NOT fixed) so LanceDB never mistakes bbox
             # for a vector column during vector-search column inference.
             pa.field("bbox", pa.list_(pa.float32())),
@@ -94,6 +95,16 @@ def upsert_chunks(table, chunks: list[Chunk], vectors: list[list[float]]) -> int
             f"chunk/vector length mismatch: {len(chunks)} vs {len(vectors)}"
         )
 
+    # Pre-Phase-C tables lack the image_path column; drop the key so a live
+    # ingest against an old index degrades instead of crashing (same spirit
+    # as retriever._has_hierarchy).
+    has_image_path = "image_path" in table.schema.names
+    if not has_image_path:
+        logger.warning(
+            "table has no image_path column — figure assets won't be linked; "
+            "run scripts/rebuild_index.py to migrate"
+        )
+
     # Delete any existing rows for these doc_ids first (doc-level upsert).
     doc_ids = {c.doc_id for c in chunks}
     for doc_id in doc_ids:
@@ -105,7 +116,7 @@ def upsert_chunks(table, chunks: list[Chunk], vectors: list[list[float]]) -> int
 
     rows: list[dict[str, Any]] = []
     for chunk, vec in zip(chunks, vectors, strict=True):
-        rows.append(
+        row: dict[str, Any] = (
             {
                 "chunk_id": chunk.chunk_id,
                 "doc_id": chunk.doc_id,
@@ -129,6 +140,9 @@ def upsert_chunks(table, chunks: list[Chunk], vectors: list[list[float]]) -> int
                 "vector": [float(v) for v in vec],
             }
         )
+        if has_image_path:
+            row["image_path"] = chunk.image_path or ""
+        rows.append(row)
     table.add(rows)
     logger.info("upserted %d chunks (%d docs)", len(rows), len(doc_ids))
     return len(rows)

@@ -39,6 +39,7 @@ from app.services.query_rewriter import expand_queries  # noqa: E402
 from app.services.retriever import format_context, retrieve_hybrid  # noqa: E402
 from app.services.settings import settings  # noqa: E402
 from app.services.vectorstore import open_or_create_table  # noqa: E402
+from app.services.vl_router import load_source_images, should_route_vl  # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger("eval")
@@ -54,20 +55,42 @@ def load_dataset(path: Path) -> list[dict[str, Any]]:
     return data
 
 
-def retrieval_hit(
+def retrieval_rank(
     sources: list[Any], expected_doc: str | None, expected_section: str | None
-) -> bool:
+) -> int | None:
+    """1-based rank of the first matching source.
+
+    None when the question carries no expectation (excluded from MRR),
+    0 on a miss.
+    """
+
     if not expected_doc and not expected_section:
-        return True  # no expectation → not evaluated
-    for s in sources:
+        return None
+    for rank, s in enumerate(sources, start=1):
         if expected_doc and expected_doc.lower() not in (s.document or "").lower():
             continue
         if expected_section:
             sec = (s.section or "").lower()
             if expected_section.lower() not in sec:
                 continue
-        return True
-    return False
+        return rank
+    return 0
+
+
+def retrieval_hit(
+    sources: list[Any], expected_doc: str | None, expected_section: str | None
+) -> bool:
+    rank = retrieval_rank(sources, expected_doc, expected_section)
+    return rank is None or rank > 0
+
+
+def _mrr(results: list[dict[str, Any]]) -> float | None:
+    """Mean reciprocal rank over questions with an expectation (miss = 0)."""
+
+    ranks = [r["retrieval_rank"] for r in results if r["retrieval_rank"] is not None]
+    if not ranks:
+        return None
+    return sum(1.0 / rk for rk in ranks if rk > 0) / len(ranks)
 
 
 def _hit_rate(results: list[dict[str, Any]]) -> float:
@@ -103,11 +126,53 @@ def _typed_retrieval_rate(
     return hits / len(tagged)
 
 
-async def _collect_stream(client, query: str, context: str) -> str:
-    """Run the full chat stream into a single string (no `s:` prefix here)."""
+def _visual_citation_rate(results: list[dict[str, Any]]) -> float | None:
+    """Fraction of image-tagged questions whose answer either cites a
+    retrieved figure ("(그림" or an [n] matching an image source index) or
+    correctly abstains. Reported only — not gated initially.
+    """
 
+    tagged = [
+        r for r in results if "image" in (r.get("tags") or []) and r.get("answer")
+    ]
+    if not tagged:
+        return None
+    ok = 0
+    for r in tagged:
+        answer = r["answer"]
+        image_idxs = [
+            i
+            for i, s in enumerate(r["retrieved"], start=1)
+            if (s.get("chunk_type") or "") in ("image", "page_image")
+        ]
+        cites = "(그림" in answer or any(f"[{i}]" in answer for i in image_idxs)
+        abstains = "이미지에서 확인 불가" in answer or "찾을 수 없습니다" in answer
+        if cites or abstains:
+            ok += 1
+    return ok / len(tagged)
+
+
+async def _collect_stream(client, query: str, context: str, sources: list[Any]) -> str:
+    """Run the full chat stream into a single string (no `s:` prefix here).
+
+    Replicates the chat router's C4 branch (VL routing via vl_router) so eval
+    measures the production generation path, including `use_vl_answer`.
+    """
+
+    vl_images = load_source_images(sources) if should_route_vl(sources) else []
     out: list[str] = []
-    async for line in stream_chat(client, query, context=context):
+    async for line in stream_chat(
+        client,
+        query,
+        context=context,
+        model=settings.vision_model if vl_images else None,
+        images=vl_images or None,
+        system_prompt=(
+            settings.prompt_vl_with_context.format(context=context)
+            if vl_images
+            else None
+        ),
+    ):
         try:
             data = json.loads(line)
         except json.JSONDecodeError:
@@ -172,7 +237,8 @@ async def run(args: argparse.Namespace) -> int:
             sources = [seen[k] for k in order][: settings.final_top_k]
             retrieval_ms = (time.perf_counter() - t0) * 1000
 
-            hit = retrieval_hit(sources, expected_doc, expected_section)
+            rank = retrieval_rank(sources, expected_doc, expected_section)
+            hit = rank is None or rank > 0
 
             answer = ""
             generation_ms = 0.0
@@ -180,7 +246,7 @@ async def run(args: argparse.Namespace) -> int:
                 context = format_context(sources)
                 t1 = time.perf_counter()
                 try:
-                    answer = await _collect_stream(client, question, context)
+                    answer = await _collect_stream(client, question, context, sources)
                 except Exception as exc:  # noqa: BLE001
                     logger.warning("generation failed for %s: %s", qid, exc)
                     answer = ""
@@ -218,6 +284,7 @@ async def run(args: argparse.Namespace) -> int:
                     "retrieved_text": [s.text for s in sources],
                     "answer": answer,
                     "retrieval_hit": hit,
+                    "retrieval_rank": rank,
                     "retrieval_ms": round(retrieval_ms, 1),
                     "generation_ms": round(generation_ms, 1),
                 }
@@ -241,7 +308,9 @@ async def run(args: argparse.Namespace) -> int:
     summary = {
         "total": len(results),
         "hit_rate": _hit_rate(results),
+        "mrr": _mrr(results),
         "hit_rate_by_tag": _hit_rate_by_tag(results),
+        "visual_citation_rate": _visual_citation_rate(results),
         "table_q_retrieved_table_chunk_rate": _typed_retrieval_rate(
             results, tag="table", types=("table", "table_summary")
         ),
@@ -260,6 +329,8 @@ async def run(args: argparse.Namespace) -> int:
         "use_contextual": settings.use_contextual,
         "use_table_summary": settings.use_table_summary,
         "use_vlm_caption": settings.use_vlm_caption,
+        "persist_figure_images": settings.persist_figure_images,
+        "use_vl_answer": settings.use_vl_answer,
     }
 
     json_path.write_text(
@@ -320,6 +391,7 @@ def _check_gate(summary: dict[str, Any], *, update: bool, tol: float = 0.001) ->
             regressions.append(f"{name}: {prev:.3f} → {cur:.3f}")
 
     check("hit_rate", summary.get("hit_rate"), base.get("hit_rate"))
+    check("mrr", summary.get("mrr"), base.get("mrr"))
     cur_tags = summary.get("hit_rate_by_tag", {})
     for tag, prev in (base.get("hit_rate_by_tag") or {}).items():
         check(f"hit_rate[{tag}]", cur_tags.get(tag), prev)

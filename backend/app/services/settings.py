@@ -39,6 +39,23 @@ SYSTEM_PROMPT_WITH_CONTEXT = """당신은 CAD 설계 문서 기반 기술 질의
 """
 
 
+SYSTEM_PROMPT_VL_WITH_CONTEXT = """당신은 CAD 설계 문서 기반 기술 질의응답 전문 AI 어시스턴트입니다.
+아래 [CONTEXT]의 정보와 첨부된 이미지(검색된 도면/그림 원본)만을 근거로 답변하세요.
+
+규칙:
+1. [CONTEXT]와 이미지에 없는 내용은 추측하지 말고 "제공된 문서에서 해당 정보를 찾을 수 없습니다"라고 답하세요.
+2. 가능하면 답변 안에 인용 번호를 `[1]`, `[2]` 형태로 표기하고, 이미지를 근거로 한 내용은 "(그림 [n])" 형태로 표기하세요 (번호는 [CONTEXT] 항목 순서).
+3. 이미지에서 판독할 수 없는 내용은 추측하지 말고 "이미지에서 확인 불가"라고 명시하세요.
+4. 텍스트 컨텍스트와 이미지 내용이 상충하면 둘 다 언급하세요.
+5. 기술 용어는 원문 그대로 사용하세요 (한국어/영어 혼용 가능).
+6. 테이블 데이터는 가능한 한 표 형식으로 제시하세요.
+7. 답변은 구조적으로 작성하세요 (번호/불릿 활용).
+
+[CONTEXT]
+{context}
+"""
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=str(_BACKEND_DIR / ".env"),
@@ -91,10 +108,25 @@ class Settings(BaseSettings):
     use_contextual: bool = True  # PR5: per-section contextual prepend
     use_vlm_caption: bool = True  # PR6: VLM image captions
 
+    # Multimodal — Phase C
+    persist_figure_images: bool = True  # C1: keep figure PNGs for citation/VL input
+    # C4: route generation to the vision model when retrieval surfaces figures.
+    # Ships off; promote to True once the C5 eval gate passes.
+    use_vl_answer: bool = False
+    vl_max_images: int = 3  # cap on figures attached to a VL request
+    # C6 pilot: ColQwen page-image retrieval over a hand-picked drawing
+    # corpus (see scripts/build_colqwen_index.py). Needs the optional
+    # colpali-engine/torch deps; keep off unless the index is built.
+    use_colqwen_pages: bool = False
+    colqwen_model: str = "vidore/colqwen2-v1.0"
+    colqwen_top_k: int = 3
+    colqwen_dir: Path = _BACKEND_DIR / ".colqwen"
+
     # Storage paths
     spec_dir: Path = _REPO_ROOT / "SPEC"
     lancedb_path: Path = _BACKEND_DIR / ".lancedb"
     lancedb_table: str = "cad_chunks"
+    assets_dir: Path = _BACKEND_DIR / ".assets"
 
     # CORS
     cors_allow_origins: list[str] = ["http://localhost:3000"]
@@ -110,6 +142,10 @@ class Settings(BaseSettings):
     @property
     def prompt_with_context(self) -> str:
         return SYSTEM_PROMPT_WITH_CONTEXT
+
+    @property
+    def prompt_vl_with_context(self) -> str:
+        return SYSTEM_PROMPT_VL_WITH_CONTEXT
 
 
 settings = Settings()

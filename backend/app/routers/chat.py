@@ -11,6 +11,7 @@ from ..services.llm import stream_chat
 from ..services.query_rewriter import expand_queries
 from ..services.retriever import format_context, retrieve_hybrid
 from ..services.settings import settings
+from ..services.vl_router import load_source_images, should_route_vl
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -83,6 +84,21 @@ async def chat(request: ChatRequest, http_request: Request):
     context = format_context(sources)
     history = [msg.model_dump() for msg in request.history] if request.history else None
 
+    # C4: when retrieval surfaced a figure, answer with the vision model and
+    # the original image(s). The explicit `request.model` override applies to
+    # the text path only — the VL route is system-decided. Routing happens
+    # before generation, so exactly one large model is resident per request;
+    # alternating text/VL queries pay an Ollama swap (~10-30s cold).
+    vl_images = load_source_images(sources) if should_route_vl(sources) else []
+    use_vl = bool(vl_images)
+    selected_model = (
+        settings.vision_model if use_vl else (request.model or settings.llm_model)
+    )
+    if use_vl:
+        logger.info(
+            "VL route: attaching %d figure(s), model=%s", len(vl_images), selected_model
+        )
+
     async def generate():
         source_payload = [s.model_dump() for s in sources]
         yield f"s:{json.dumps(source_payload, ensure_ascii=False)}\n"
@@ -92,9 +108,15 @@ async def chat(request: ChatRequest, http_request: Request):
             async for line in stream_chat(
                 client,
                 request.message,
-                model=request.model,
+                model=selected_model,
                 context=context,
                 history=history,
+                images=vl_images or None,
+                system_prompt=(
+                    settings.prompt_vl_with_context.format(context=context)
+                    if use_vl
+                    else None
+                ),
             ):
                 try:
                     data = json.loads(line)
@@ -115,6 +137,7 @@ async def chat(request: ChatRequest, http_request: Request):
         finish_payload = {
             "finishReason": finish_reason,
             "usage": {"promptTokens": 0, "completionTokens": 0},
+            "model": selected_model,
         }
         yield f"e:{json.dumps(finish_payload)}\n"
         yield f"d:{json.dumps({'finishReason': finish_reason})}\n"

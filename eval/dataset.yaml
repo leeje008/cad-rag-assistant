@@ -109,3 +109,46 @@
 - id: general-02
   question: Vendor Subvendor List 최신 개정판
   expected_doc: AVL_Subvendor
+
+# --- Phase C 멀티모달 확장 문항 (Claude 생성, 사용자 검수 필요) ---
+# 이미지/표 비중 강화. [image, visual] 문항은 그림에서만 답이 나오는 질의로,
+# VL 라우팅(visual_citation_rate) 측정 대상.
+
+- id: pid-05
+  question: P&ID 범례에서 gate valve와 globe valve 심볼은 어떻게 구분되는가?
+  expected_doc: P&ID
+  tags: [image, symbol]
+- id: pid-06
+  question: P&ID Symbol & Legend에 정의된 instrument 태그 표기 규칙은?
+  expected_doc: P&ID
+  tags: [image, symbol]
+- id: visual-01
+  question: 체크밸브 심볼은 어떤 모양으로 그려져 있는가?
+  expected_doc: P&ID
+  tags: [image, visual]
+- id: visual-02
+  question: P&ID 도면에서 배관 라인 번호는 어떤 형식으로 표기되어 있는가?
+  expected_doc: P&ID
+  tags: [image, visual]
+- id: visual-03
+  question: Spray Nozzle 자료의 그림에서 분사 패턴은 어떤 형태로 표시되는가?
+  expected_doc: Spray Nozzle
+  tags: [image, visual]
+- id: nozzle-06
+  question: 노즐 사이즈별 허용 moment 값은 기준표에서 어떻게 조회하는가?
+  expected_doc: Nozzle Load
+  tags: [table]
+- id: nozzle-07
+  question: Allowable nozzle load 기준표에 사용된 단위는 무엇인가?
+  expected_doc: Nozzle Load
+  tags: [table]
+- id: table-01
+  question: Master BM List 표의 열(컬럼) 구성은 어떻게 되는가?
+  tags: [table]
+- id: table-02
+  question: Vendor Print Index and Schedule 표에는 어떤 항목이 포함되는가?
+  expected_doc: MR Appendix-4
+  tags: [table]
+- id: table-03
+  question: Inspection Test Plan 검사 항목 표에 포함된 검사 단계는?
+  tags: [table]

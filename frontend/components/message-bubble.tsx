@@ -1,4 +1,5 @@
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { MarkdownContent } from "@/components/markdown-content";
 import { SourceCards, type Source } from "@/components/source-card";
 
 interface MessageBubbleProps {
@@ -33,13 +34,13 @@ export function MessageBubble({
         className={`flex flex-col max-w-[80%] ${isUser ? "items-end" : "items-start"}`}
       >
         <div
-          className={`rounded-lg px-4 py-3 text-sm leading-relaxed whitespace-pre-wrap ${
+          className={`rounded-lg px-4 py-3 text-sm leading-relaxed ${
             isUser
-              ? "bg-primary text-primary-foreground"
+              ? "bg-primary text-primary-foreground whitespace-pre-wrap"
               : "bg-card border border-border"
           }`}
         >
-          {content}
+          {isUser ? content : <MarkdownContent content={content} />}
           {isStreaming && (
             <span className="inline-block w-1.5 h-4 ml-0.5 bg-foreground/70 animate-pulse" />
           )}

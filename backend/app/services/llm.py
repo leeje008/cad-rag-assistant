@@ -31,20 +31,28 @@ async def stream_chat(
     model: str | None = None,
     context: str | None = None,
     history: list[dict] | None = None,
+    images: list[str] | None = None,
+    system_prompt: str | None = None,
 ) -> AsyncIterator[str]:
     """Stream raw JSON lines from Ollama.
 
     The caller decides how to translate them into the Vercel AI SDK data
-    stream protocol.
+    stream protocol. `images` (base64 PNGs) attach to the final user message
+    via Ollama's native multimodal field — only meaningful with a vision
+    model. `system_prompt`, when given, overrides the default context prompt
+    (the caller is responsible for any {context} formatting).
     """
 
     selected_model = model or settings.llm_model
     messages: list[dict] = [
-        {"role": "system", "content": _build_system_prompt(context)},
+        {"role": "system", "content": system_prompt or _build_system_prompt(context)},
     ]
     if history:
         messages.extend(history)
-    messages.append({"role": "user", "content": message})
+    user_message: dict = {"role": "user", "content": message}
+    if images:
+        user_message["images"] = images
+    messages.append(user_message)
 
     payload = {
         "model": selected_model,
