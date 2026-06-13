@@ -80,6 +80,14 @@ async def _run(path: Path, dry_run: bool) -> int:
         return 1
     logger.info("discovered %d files under %s", len(files), path)
 
+    # Full rebuild: clear persisted figure assets so figures from removed
+    # docs don't linger. Partial (--path) rebuilds overwrite in place only,
+    # since asset paths are deterministic per doc_id.
+    full_rebuild = path.resolve() == Path(settings.spec_dir).resolve()
+    if not dry_run and full_rebuild and settings.assets_dir.exists():
+        shutil.rmtree(settings.assets_dir)
+        logger.info("cleared figure assets dir %s", settings.assets_dir)
+
     total_chunks = 0
     errors: list[str] = []
 
