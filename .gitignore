@@ -35,10 +35,18 @@ Thumbs.db
 SPEC/
 SPEC.7z
 CAD-RAG-*.docx
+CAD_*.pdf
 
 # Vector DB data
 data/lancedb/
 backend/.lancedb/
+
+# Generated multimodal assets (figure/page PNGs, ColQwen sidecar index)
+backend/.assets/
+backend/.colqwen/
+
+# Local planning artifacts (deep-interview specs, OMC state)
+.omc/
 
 # Logs
 *.log
