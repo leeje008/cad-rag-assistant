@@ -13,6 +13,7 @@ Enrichment stages (each gated by a setting, all one-off batch cost):
 
 from __future__ import annotations
 
+import base64
 import logging
 from dataclasses import replace
 
@@ -88,6 +89,28 @@ async def _build_embed_inputs(
     return inputs
 
 
+def _persist_figure_images(chunks: list[Chunk]) -> None:
+    """Write each image chunk's transient PNG under settings.assets_dir.
+
+    Path is deterministic per doc_id (`<doc_id>/fig_<n>.png`), so re-ingest
+    overwrites in place. Persisted even when the later caption falls back to
+    a placeholder — the figure must stay citable. Failures only log; ingest
+    never blocks on asset persistence.
+    """
+
+    for c in chunks:
+        if c.chunk_type != "image" or not c.image_b64 or not c.figure_id:
+            continue
+        n = c.figure_id.rsplit(":", 1)[-1]
+        rel = f"{c.doc_id}/fig_{n}.png"
+        try:
+            (settings.assets_dir / c.doc_id).mkdir(parents=True, exist_ok=True)
+            (settings.assets_dir / rel).write_bytes(base64.b64decode(c.image_b64))
+            c.image_path = rel
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("figure persist failed for %s: %s", c.figure_id, exc)
+
+
 async def _caption_images(
     client: httpx.AsyncClient, chunks: list[Chunk], doc: ParsedDoc
 ) -> None:
@@ -124,6 +147,9 @@ async def build_chunks_and_vectors(
 
     if settings.use_table_summary:
         chunks = await _add_table_summaries(client, chunks, doc)
+
+    if settings.persist_figure_images:
+        _persist_figure_images(chunks)
 
     if settings.use_vlm_caption:
         await _caption_images(client, chunks, doc)

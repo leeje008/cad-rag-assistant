@@ -39,6 +39,10 @@ class Source(BaseModel):
     chunk_type: str = "text"
     table_id: str | None = None
     parent_id: str | None = None
+    figure_id: str | None = None
+    bbox: list[float] | None = None
+    image_url: str | None = None
+    table_html: str | None = None
 
 
 class IngestRequest(BaseModel):

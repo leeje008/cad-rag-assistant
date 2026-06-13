@@ -38,6 +38,7 @@ class Chunk:
     level: int = 1  # 0 = parent/section, 1 = child
     table_html: str | None = None
     image_b64: str | None = None  # transient: VLM input, never written to LanceDB
+    image_path: str | None = None  # relative to settings.assets_dir, e.g. "<doc_id>/fig_0.png"
 
 
 def _split_length(text: str, max_chars: int, min_chars: int, overlap: int) -> list[str]:
